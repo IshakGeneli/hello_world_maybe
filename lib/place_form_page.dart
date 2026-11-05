@@ -3,6 +3,8 @@ import 'package:geolocator/geolocator.dart';
 
 import 'api.dart';
 import 'common.dart';
+import 'location_picker_page.dart';
+import 'osm.dart';
 
 /// Yer ekleme / düzenleme formu. Kaydedince güncel [Place] ile geri döner.
 class PlaceFormPage extends StatefulWidget {
@@ -111,11 +113,43 @@ class _PlaceFormPageState extends State<PlaceFormPage> {
         _input.lat = pos.latitude;
         _input.lng = pos.longitude;
       });
+      // Konum adı boşsa adresi otomatik doldur
+      if (_location.text.trim().isEmpty) {
+        final name = await Osm.reverse(pos.latitude, pos.longitude);
+        if (name != null && mounted && _location.text.trim().isEmpty) {
+          _location.text = name;
+        }
+      }
     } catch (e) {
       if (mounted) showMessage(context, 'Konum alınamadı: $e');
     } finally {
       if (mounted) setState(() => _locating = false);
     }
+  }
+
+  Future<void> _pickOnMap() async {
+    FocusScope.of(context).unfocus();
+    final picked = await Navigator.push<PickedLocation>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => LocationPickerPage(
+          lat: _input.lat,
+          lng: _input.lng,
+          // Koordinat yoksa yazılan adı ya da yer adını aramaya hazırla
+          initialQuery: _input.lat == null
+              ? (_location.text.trim().isNotEmpty
+                  ? _location.text.trim()
+                  : _title.text.trim())
+              : null,
+        ),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      _input.lat = picked.lat;
+      _input.lng = picked.lng;
+      if (picked.name != null) _location.text = picked.name!;
+    });
   }
 
   String? _clean(String s) => s.trim().isEmpty ? null : s.trim();
@@ -243,8 +277,15 @@ class _PlaceFormPageState extends State<PlaceFormPage> {
               ),
             ),
             const SizedBox(height: 6),
-            Row(
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
               children: [
+                FilledButton.tonalIcon(
+                  onPressed: _pickOnMap,
+                  icon: const Icon(Icons.map_outlined),
+                  label: const Text('Haritadan seç'),
+                ),
                 OutlinedButton.icon(
                   onPressed: _locating ? null : _useMyLocation,
                   icon: _locating
@@ -255,25 +296,44 @@ class _PlaceFormPageState extends State<PlaceFormPage> {
                       : const Icon(Icons.my_location),
                   label: const Text('Şu anki konumum'),
                 ),
-                const SizedBox(width: 8),
-                if (_input.lat != null && _input.lng != null) ...[
-                  Expanded(
-                    child: Text(
-                      '${_input.lat!.toStringAsFixed(5)}, ${_input.lng!.toStringAsFixed(5)}',
-                      style: theme.textTheme.bodySmall,
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close),
-                    tooltip: 'Koordinatı kaldır',
-                    onPressed: () => setState(() {
-                      _input.lat = null;
-                      _input.lng = null;
-                    }),
-                  ),
-                ],
               ],
             ),
+            if (_input.lat != null && _input.lng != null) ...[
+              const SizedBox(height: 8),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: SizedBox(
+                  height: 160,
+                  child: Stack(
+                    children: [
+                      MapPreview(
+                        key: ValueKey('${_input.lat},${_input.lng}'),
+                        lat: _input.lat!,
+                        lng: _input.lng!,
+                        onTap: _pickOnMap,
+                      ),
+                      Positioned(
+                        top: 4,
+                        right: 4,
+                        child: IconButton.filledTonal(
+                          icon: const Icon(Icons.close),
+                          tooltip: 'Konumu kaldır',
+                          onPressed: () => setState(() {
+                            _input.lat = null;
+                            _input.lng = null;
+                          }),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '${_input.lat!.toStringAsFixed(5)}, ${_input.lng!.toStringAsFixed(5)}',
+                style: theme.textTheme.bodySmall,
+              ),
+            ],
             const SizedBox(height: 12),
 
             TextFormField(

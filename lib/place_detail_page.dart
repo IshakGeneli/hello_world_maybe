@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 
 import 'api.dart';
 import 'common.dart';
+import 'location_picker_page.dart';
 import 'place_form_page.dart';
 
 class PlaceDetailPage extends StatefulWidget {
@@ -339,6 +340,22 @@ class _PlaceDetailPageState extends State<PlaceDetailPage> {
                 leading: const Icon(Icons.event_outlined),
                 title: Text(formatDate(p.date!)),
                 subtitle: Text(relativeDays(p.date!)),
+              ),
+            if (p.hasCoords)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: SizedBox(
+                    height: 170,
+                    child: MapPreview(
+                      key: ValueKey('${p.lat},${p.lng}'),
+                      lat: p.lat!,
+                      lng: p.lng!,
+                      onTap: () => openInMaps(context, p),
+                    ),
+                  ),
+                ),
               ),
             if (p.locationName != null || p.hasCoords)
               ListTile(
