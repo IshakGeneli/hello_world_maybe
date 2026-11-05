@@ -51,6 +51,9 @@ class Place {
   final int photoCount;
   final String? coverUrl;
   final List<Photo> photos;
+  final int? agendaId;
+  final String? createdBy; // yeri ekleyen kişinin adı
+  final Access? access; // sadece detayda gelir
 
   Place({
     required this.id,
@@ -66,6 +69,9 @@ class Place {
     this.photoCount = 0,
     this.coverUrl,
     this.photos = const [],
+    this.agendaId,
+    this.createdBy,
+    this.access,
   });
 
   bool get hasCoords => lat != null && lng != null;
@@ -87,6 +93,11 @@ class Place {
                 ?.map((e) => Photo.fromJson(e as Map<String, dynamic>))
                 .toList() ??
             const [],
+        agendaId: j['agendaId'] as int?,
+        createdBy: j['createdBy'] as String?,
+        access: j['access'] == null
+            ? null
+            : Access.fromJson(j['access'] as Map<String, dynamic>),
       );
 }
 
@@ -144,41 +155,307 @@ class PlaceInput {
 
 class ApiException implements Exception {
   final String message;
-  ApiException(this.message);
+  final int? statusCode;
+  ApiException(this.message, [this.statusCode]);
   @override
   String toString() => message;
 }
 
+// ---------- Hesap ve paylaşım modelleri ----------
+
+class AppUser {
+  final int id;
+  final String email;
+  final String name;
+
+  AppUser({required this.id, required this.email, required this.name});
+
+  factory AppUser.fromJson(Map<String, dynamic> j) => AppUser(
+        id: j['id'] as int,
+        email: j['email'] as String,
+        name: j['name'] as String,
+      );
+
+  Map<String, dynamic> toJson() => {'id': id, 'email': email, 'name': name};
+}
+
+/// Bir ajandadaki yetkiler.
+class Access {
+  final bool isOwner;
+  final bool canAdd;
+  final bool canEdit;
+  final bool canDelete;
+
+  const Access({
+    this.isOwner = false,
+    this.canAdd = false,
+    this.canEdit = false,
+    this.canDelete = false,
+  });
+
+  static const owner =
+      Access(isOwner: true, canAdd: true, canEdit: true, canDelete: true);
+
+  factory Access.fromJson(Map<String, dynamic> j) => Access(
+        isOwner: j['isOwner'] as bool? ?? false,
+        canAdd: j['canAdd'] as bool? ?? false,
+        canEdit: j['canEdit'] as bool? ?? false,
+        canDelete: j['canDelete'] as bool? ?? false,
+      );
+}
+
+/// Kullanıcının görebildiği bir ajanda (kendisininki ya da paylaşılan).
+class Agenda {
+  final int id; // ajanda sahibinin kullanıcı id'si
+  final int? invitationId; // paylaşılan ajandalarda: ayrılmak için
+  final String ownerName;
+  final String ownerEmail;
+  final Access access;
+
+  Agenda({
+    required this.id,
+    required this.ownerName,
+    required this.ownerEmail,
+    required this.access,
+    this.invitationId,
+  });
+
+  bool get isOwner => access.isOwner;
+  String get title => isOwner ? 'Ajandam' : ownerName;
+
+  /// "ekleme, düzenleme" gibi kısa yetki özeti.
+  String get permissionSummary {
+    if (isOwner) return 'Sahibi sensin';
+    final p = [
+      if (access.canAdd) 'ekleme',
+      if (access.canEdit) 'düzenleme',
+      if (access.canDelete) 'silme',
+    ];
+    return p.isEmpty ? 'Sadece görüntüleme' : 'Yetkilerin: ${p.join(', ')}';
+  }
+
+  factory Agenda.fromJson(Map<String, dynamic> j) => Agenda(
+        id: j['id'] as int,
+        invitationId: j['invitationId'] as int?,
+        ownerName: j['ownerName'] as String,
+        ownerEmail: j['ownerEmail'] as String,
+        access: Access.fromJson(j),
+      );
+}
+
+enum InvitationStatus { pending, accepted, declined }
+
+class Invitation {
+  final int id;
+  final String email;
+  final InvitationStatus status;
+  final bool canAdd;
+  final bool canEdit;
+  final bool canDelete;
+  final String? memberName; // gönderilen davetlerde: davetlinin hesabı varsa adı
+  final AppUser? owner; // gelen davetlerde: davet eden
+
+  Invitation({
+    required this.id,
+    required this.email,
+    required this.status,
+    required this.canAdd,
+    required this.canEdit,
+    required this.canDelete,
+    this.memberName,
+    this.owner,
+  });
+
+  factory Invitation.fromJson(Map<String, dynamic> j) => Invitation(
+        id: j['id'] as int,
+        email: j['email'] as String,
+        status: InvitationStatus.values.byName(j['status'] as String),
+        canAdd: j['canAdd'] as bool,
+        canEdit: j['canEdit'] as bool,
+        canDelete: j['canDelete'] as bool,
+        memberName: j['memberName'] as String?,
+        owner: j['owner'] == null
+            ? null
+            : AppUser.fromJson(j['owner'] as Map<String, dynamic>),
+      );
+}
+
+class AuthResult {
+  final String token;
+  final AppUser user;
+  AuthResult(this.token, this.user);
+}
+
+// ---------- API ----------
+
 class PhotoApi {
   static final http.Client _client = http.Client();
 
+  /// Oturum anahtarı. Session tarafından ayarlanır.
+  static String? token;
+
+  /// Sunucu 401 dönünce çağrılır (oturumu kapatmak için).
+  static void Function()? onUnauthorized;
+
+  /// Fotoğrafları (Image.network) yüklerken de gereken başlıklar.
+  static Map<String, String> get authHeaders =>
+      token == null ? const {} : {'Authorization': 'Bearer $token'};
+
+  static Map<String, String> get _jsonHeaders =>
+      {'Content-Type': 'application/json', ...authHeaders};
+
   Uri _u(String path) => Uri.parse('$apiUrl$path');
-
-  static const _jsonHeaders = {'Content-Type': 'application/json'};
-
-  String _errorFrom(http.Response r) {
-    try {
-      final body = jsonDecode(utf8.decode(r.bodyBytes));
-      if (body is Map && body['error'] != null) return body['error'].toString();
-    } catch (_) {}
-    return 'Sunucu hatası (${r.statusCode})';
-  }
 
   dynamic _decode(http.Response r) => jsonDecode(utf8.decode(r.bodyBytes));
 
-  // ---------- Fotoğraflar ----------
-
-  Future<List<Photo>> list() async {
-    final r = await _client.get(_u('/photos')).timeout(_timeout);
-    if (r.statusCode != 200) throw ApiException(_errorFrom(r));
-    final data = _decode(r) as List;
-    return data.map((e) => Photo.fromJson(e as Map<String, dynamic>)).toList();
+  /// Beklenen durum kodu değilse anlaşılır bir hata fırlatır.
+  void _check(http.Response r, List<int> ok, {bool isAuthCall = false}) {
+    if (ok.contains(r.statusCode)) return;
+    String message = 'Sunucu hatası (${r.statusCode})';
+    try {
+      final body = _decode(r);
+      if (body is Map && body['error'] != null) message = body['error'].toString();
+    } catch (_) {}
+    if (r.statusCode == 401 && !isAuthCall) onUnauthorized?.call();
+    throw ApiException(message, r.statusCode);
   }
 
-  /// [placeId] verilirse fotoğraf o yere eklenir.
-  Future<Photo> upload(XFile file, {int? placeId}) async {
-    final path = placeId == null ? '/photos' : '/places/$placeId/photos';
-    final req = http.MultipartRequest('POST', _u(path));
+  Future<http.Response> _get(String path) =>
+      _client.get(_u(path), headers: authHeaders).timeout(_timeout);
+
+  Future<http.Response> _post(String path, [Object? body]) => _client
+      .post(_u(path), headers: _jsonHeaders, body: jsonEncode(body ?? {}))
+      .timeout(_timeout);
+
+  Future<http.Response> _put(String path, Object body) => _client
+      .put(_u(path), headers: _jsonHeaders, body: jsonEncode(body))
+      .timeout(_timeout);
+
+  Future<http.Response> _delete(String path) =>
+      _client.delete(_u(path), headers: authHeaders).timeout(_timeout);
+
+  // ---------- Hesap ----------
+
+  Future<AuthResult> login(String email, String password) async {
+    final r = await _post('/auth/login', {'email': email, 'password': password});
+    _check(r, [200], isAuthCall: true);
+    final j = _decode(r) as Map<String, dynamic>;
+    return AuthResult(
+        j['token'] as String, AppUser.fromJson(j['user'] as Map<String, dynamic>));
+  }
+
+  Future<AuthResult> register(String email, String password, String name) async {
+    final r = await _post(
+        '/auth/register', {'email': email, 'password': password, 'name': name});
+    _check(r, [201], isAuthCall: true);
+    final j = _decode(r) as Map<String, dynamic>;
+    return AuthResult(
+        j['token'] as String, AppUser.fromJson(j['user'] as Map<String, dynamic>));
+  }
+
+  /// Bekleyen davet sayısı.
+  Future<int> pendingInvitations() async {
+    final r = await _get('/me');
+    _check(r, [200]);
+    return (_decode(r) as Map<String, dynamic>)['pendingInvitations'] as int;
+  }
+
+  // ---------- Ajandalar ve davetler ----------
+
+  Future<List<Agenda>> agendas() async {
+    final r = await _get('/agendas');
+    _check(r, [200]);
+    return (_decode(r) as List)
+        .map((e) => Agenda.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<Invitation> invite(String email,
+      {bool canAdd = true, bool canEdit = false, bool canDelete = false}) async {
+    final r = await _post('/invitations', {
+      'email': email,
+      'canAdd': canAdd,
+      'canEdit': canEdit,
+      'canDelete': canDelete,
+    });
+    _check(r, [201]);
+    return Invitation.fromJson(_decode(r) as Map<String, dynamic>);
+  }
+
+  Future<List<Invitation>> sentInvitations() async {
+    final r = await _get('/invitations/sent');
+    _check(r, [200]);
+    return (_decode(r) as List)
+        .map((e) => Invitation.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<List<Invitation>> receivedInvitations() async {
+    final r = await _get('/invitations/received');
+    _check(r, [200]);
+    return (_decode(r) as List)
+        .map((e) => Invitation.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<Invitation> updateInvitation(int id,
+      {bool? canAdd, bool? canEdit, bool? canDelete}) async {
+    final r = await _put('/invitations/$id', {
+      if (canAdd != null) 'canAdd': canAdd,
+      if (canEdit != null) 'canEdit': canEdit,
+      if (canDelete != null) 'canDelete': canDelete,
+    });
+    _check(r, [200]);
+    return Invitation.fromJson(_decode(r) as Map<String, dynamic>);
+  }
+
+  Future<void> acceptInvitation(int id) async =>
+      _check(await _post('/invitations/$id/accept'), [200]);
+
+  Future<void> declineInvitation(int id) async =>
+      _check(await _post('/invitations/$id/decline'), [200]);
+
+  /// Sahip için üyeyi çıkarır; davetli için ajandadan ayrılır.
+  Future<void> deleteInvitation(int id) async =>
+      _check(await _delete('/invitations/$id'), [204, 404]);
+
+  // ---------- Yerler ----------
+
+  Future<List<Place>> places(int agendaId, PlaceStatus status) async {
+    final r = await _get('/places?agenda=$agendaId&status=${status.name}');
+    _check(r, [200]);
+    return (_decode(r) as List)
+        .map((e) => Place.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<Place> place(int id) async {
+    final r = await _get('/places/$id');
+    _check(r, [200]);
+    return Place.fromJson(_decode(r) as Map<String, dynamic>);
+  }
+
+  Future<Place> createPlace(int agendaId, PlaceInput input) async {
+    final r = await _post('/places', {...input.toJson(), 'agendaId': agendaId});
+    _check(r, [201]);
+    return Place.fromJson(_decode(r) as Map<String, dynamic>);
+  }
+
+  /// Sadece [fields] içindeki alanları günceller.
+  Future<Place> updatePlace(int id, Map<String, dynamic> fields) async {
+    final r = await _put('/places/$id', fields);
+    _check(r, [200]);
+    return Place.fromJson(_decode(r) as Map<String, dynamic>);
+  }
+
+  Future<void> deletePlace(int id) async =>
+      _check(await _delete('/places/$id'), [204, 404]);
+
+  // ---------- Fotoğraflar ----------
+
+  Future<Photo> upload(XFile file, {required int placeId}) async {
+    final req = http.MultipartRequest('POST', _u('/places/$placeId/photos'));
+    req.headers.addAll(authHeaders);
     req.files.add(await http.MultipartFile.fromPath(
       'photo',
       file.path,
@@ -187,57 +464,12 @@ class PhotoApi {
     ));
     final streamed = await _client.send(req).timeout(_timeout);
     final r = await http.Response.fromStream(streamed);
-    if (r.statusCode != 201) throw ApiException(_errorFrom(r));
+    _check(r, [201]);
     return Photo.fromJson(_decode(r) as Map<String, dynamic>);
   }
 
-  Future<void> delete(int id) async {
-    final r = await _client.delete(_u('/photos/$id')).timeout(_timeout);
-    if (r.statusCode != 204 && r.statusCode != 404) {
-      throw ApiException(_errorFrom(r));
-    }
-  }
-
-  // ---------- Yerler ----------
-
-  Future<List<Place>> places(PlaceStatus status) async {
-    final r =
-        await _client.get(_u('/places?status=${status.name}')).timeout(_timeout);
-    if (r.statusCode != 200) throw ApiException(_errorFrom(r));
-    final data = _decode(r) as List;
-    return data.map((e) => Place.fromJson(e as Map<String, dynamic>)).toList();
-  }
-
-  Future<Place> place(int id) async {
-    final r = await _client.get(_u('/places/$id')).timeout(_timeout);
-    if (r.statusCode != 200) throw ApiException(_errorFrom(r));
-    return Place.fromJson(_decode(r) as Map<String, dynamic>);
-  }
-
-  Future<Place> createPlace(PlaceInput input) async {
-    final r = await _client
-        .post(_u('/places'),
-            headers: _jsonHeaders, body: jsonEncode(input.toJson()))
-        .timeout(_timeout);
-    if (r.statusCode != 201) throw ApiException(_errorFrom(r));
-    return Place.fromJson(_decode(r) as Map<String, dynamic>);
-  }
-
-  /// Sadece [fields] içindeki alanları günceller.
-  Future<Place> updatePlace(int id, Map<String, dynamic> fields) async {
-    final r = await _client
-        .put(_u('/places/$id'), headers: _jsonHeaders, body: jsonEncode(fields))
-        .timeout(_timeout);
-    if (r.statusCode != 200) throw ApiException(_errorFrom(r));
-    return Place.fromJson(_decode(r) as Map<String, dynamic>);
-  }
-
-  Future<void> deletePlace(int id) async {
-    final r = await _client.delete(_u('/places/$id')).timeout(_timeout);
-    if (r.statusCode != 204 && r.statusCode != 404) {
-      throw ApiException(_errorFrom(r));
-    }
-  }
+  Future<void> delete(int photoId) async =>
+      _check(await _delete('/photos/$photoId'), [204, 404]);
 
   /// Sunucu sadece image/* kabul ettiği için türü doğru göndermek şart.
   MediaType _mediaType(XFile f) {

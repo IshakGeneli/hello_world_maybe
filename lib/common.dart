@@ -80,6 +80,7 @@ class NetImage extends StatelessWidget {
     final bg = Theme.of(context).colorScheme.surfaceContainerHighest;
     return Image.network(
       url,
+      headers: PhotoApi.authHeaders,
       fit: fit,
       cacheWidth: cacheWidth,
       loadingBuilder: (_, child, progress) =>
@@ -176,6 +177,7 @@ class _PhotoViewerPageState extends State<PhotoViewerPage> {
           child: Center(
             child: Image.network(
               _photos[i].url,
+              headers: PhotoApi.authHeaders,
               loadingBuilder: (_, child, progress) => progress == null
                   ? child
                   : const CircularProgressIndicator(color: Colors.white),

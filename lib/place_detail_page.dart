@@ -29,6 +29,7 @@ class _PlaceDetailPageState extends State<PlaceDetailPage> {
   final ImagePicker _picker = ImagePicker();
 
   Place? _place;
+  Access _access = const Access();
   List<Photo> _photos = [];
   final List<_Pending> _pending = [];
   String? _error;
@@ -53,6 +54,7 @@ class _PlaceDetailPageState extends State<PlaceDetailPage> {
       if (!mounted) return;
       setState(() {
         _place = p;
+        _access = p.access ?? const Access();
         _photos = List.of(p.photos);
       });
     } catch (e) {
@@ -156,7 +158,7 @@ class _PlaceDetailPageState extends State<PlaceDetailPage> {
         builder: (_) => PhotoViewerPage(
           photos: _photos,
           initialIndex: index,
-          onDelete: _deletePhoto,
+          onDelete: _access.canDelete ? _deletePhoto : null,
         ),
       ),
     );
@@ -270,21 +272,24 @@ class _PlaceDetailPageState extends State<PlaceDetailPage> {
       appBar: AppBar(
         title: Text(p.title, overflow: TextOverflow.ellipsis),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.edit_outlined),
-            tooltip: 'Düzenle',
-            onPressed: () => _edit(),
-          ),
-          PopupMenuButton<String>(
+          if (_access.canEdit)
+            IconButton(
+              icon: const Icon(Icons.edit_outlined),
+              tooltip: 'Düzenle',
+              onPressed: () => _edit(),
+            ),
+          if (_access.canDelete || (visited && _access.canEdit))
+            PopupMenuButton<String>(
             onSelected: (v) {
               if (v == 'delete') _deletePlace();
               if (v == 'planned') _moveToPlanned();
             },
             itemBuilder: (_) => [
-              if (visited)
+              if (visited && _access.canEdit)
                 const PopupMenuItem(
                     value: 'planned', child: Text('Gezileceklere geri taşı')),
-              const PopupMenuItem(value: 'delete', child: Text('Yeri sil')),
+              if (_access.canDelete)
+                const PopupMenuItem(value: 'delete', child: Text('Yeri sil')),
             ],
           ),
         ],
@@ -295,6 +300,7 @@ class _PlaceDetailPageState extends State<PlaceDetailPage> {
           padding: const EdgeInsets.only(bottom: 32),
           children: [
             // Fotoğraf şeridi
+            if (_photos.isNotEmpty || _pending.isNotEmpty || _access.canAdd)
             SizedBox(
               height: 140,
               child: ListView(
@@ -307,6 +313,7 @@ class _PlaceDetailPageState extends State<PlaceDetailPage> {
                       child: NetImage(_photos[i].url, cacheWidth: 360),
                     ),
                   for (final pe in _pending) _pendingThumb(pe),
+                  if (_access.canAdd)
                   _thumb(
                     onTap: _showPhotoSourceSheet,
                     child: Container(
@@ -334,6 +341,7 @@ class _PlaceDetailPageState extends State<PlaceDetailPage> {
               leading: Icon(visited ? Icons.check_circle : Icons.flag_outlined,
                   color: visited ? Colors.green : theme.colorScheme.primary),
               title: Text(visited ? 'Gezildi' : 'Gezilecek'),
+              subtitle: p.createdBy != null ? Text('Ekleyen: ${p.createdBy}') : null,
             ),
             if (p.date != null)
               ListTile(
@@ -369,7 +377,7 @@ class _PlaceDetailPageState extends State<PlaceDetailPage> {
                 onTap: () => openInMaps(context, p),
               ),
 
-            if (!visited)
+            if (!visited && _access.canEdit)
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
                 child: FilledButton.icon(
@@ -386,11 +394,17 @@ class _PlaceDetailPageState extends State<PlaceDetailPage> {
                 child: Align(
                   alignment: Alignment.centerLeft,
                   child: StarRating(
-                      value: p.rating, size: 32, onChanged: _setRating),
+                      value: p.rating,
+                      size: 32,
+                      onChanged: _access.canEdit ? _setRating : null),
                 ),
               ),
               _section('Yorum'),
-              _textBlock(p.comment, 'Henüz yorum yok. Düzenle ile ekleyebilirsin.'),
+              _textBlock(
+                  p.comment,
+                  _access.canEdit
+                      ? 'Henüz yorum yok. Düzenle ile ekleyebilirsin.'
+                      : 'Henüz yorum yok.'),
             ],
 
             _section('Notlar'),

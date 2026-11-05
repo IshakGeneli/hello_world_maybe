@@ -9,6 +9,9 @@ import 'osm.dart';
 /// Yer ekleme / düzenleme formu. Kaydedince güncel [Place] ile geri döner.
 class PlaceFormPage extends StatefulWidget {
   final Place? existing;
+
+  /// Yeni yer hangi ajandaya eklenecek (ajanda sahibinin id'si).
+  final int? agendaId;
   final PlaceStatus initialStatus;
 
   /// "Gezildi olarak işaretle": durumu gezildi yapar, tarih yoksa bugünü koyar.
@@ -17,6 +20,7 @@ class PlaceFormPage extends StatefulWidget {
   const PlaceFormPage({
     super.key,
     this.existing,
+    this.agendaId,
     this.initialStatus = PlaceStatus.planned,
     this.markVisited = false,
   });
@@ -166,7 +170,7 @@ class _PlaceFormPageState extends State<PlaceFormPage> {
     try {
       final saved = _editing
           ? await _api.updatePlace(widget.existing!.id, _input.toJson())
-          : await _api.createPlace(_input);
+          : await _api.createPlace(widget.agendaId!, _input);
       if (mounted) Navigator.pop(context, saved);
     } catch (e) {
       if (mounted) showMessage(context, 'Kaydedilemedi: $e');

@@ -458,7 +458,7 @@ app.get('/me', auth, h(async (req, res) => {
 
 app.get('/agendas', auth, h(async (req, res) => {
   const { rows } = await pool.query(
-    `SELECT i.owner_id, u.name, u.email, i.can_add, i.can_edit, i.can_delete
+    `SELECT i.id AS invitation_id, i.owner_id, u.name, u.email, i.can_add, i.can_edit, i.can_delete
      FROM invitations i JOIN users u ON u.id = i.owner_id
      WHERE i.email = $1 AND i.status = 'accepted'
      ORDER BY u.name`,
@@ -476,6 +476,7 @@ app.get('/agendas', auth, h(async (req, res) => {
     },
     ...rows.map((r) => ({
       id: r.owner_id,
+      invitationId: r.invitation_id,
       ownerName: r.name,
       ownerEmail: r.email,
       isOwner: false,

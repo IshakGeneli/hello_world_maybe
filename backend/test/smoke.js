@@ -168,6 +168,7 @@ async function step(name, fn) {
     const shared = ag.json.find((x) => !x.isOwner);
     assert.equal(shared.id, ali.user.id);
     assert.equal(shared.ownerName, 'Ali');
+    assert.equal(shared.invitationId, invAyse.id);
     assert.deepEqual([shared.canAdd, shared.canEdit, shared.canDelete], [true, false, false]);
   });
 
