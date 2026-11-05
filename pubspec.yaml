@@ -10,6 +10,8 @@ dependencies:
   flutter:
     sdk: flutter
   image_picker: ^1.1.2
+  http: ^1.2.2
+  http_parser: ^4.0.2
 
 flutter:
   uses-material-design: true

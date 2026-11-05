@@ -34,6 +34,12 @@ jobs:
           if [ ! -d android ]; then
             flutter create . --platforms android --org com.example --project-name hello_world
           fi
+          # Release APK'nın sunucuya bağlanabilmesi için internet izni
+          M=android/app/src/main/AndroidManifest.xml
+          if ! grep -q 'android.permission.INTERNET' "$M"; then
+            sed -i '0,/<manifest[^>]*>/s##&\n    <uses-permission android:name="android.permission.INTERNET"/>#' "$M"
+          fi
+          grep -n 'INTERNET' "$M"
 
       - run: flutter pub get
 
