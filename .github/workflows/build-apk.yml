@@ -1,13 +1,13 @@
 name: Android APK Derle
 
+# Sadece elle başlatılınca derlenir (push'ta otomatik çalışmaz)
 on:
-  push:
-    branches: [main]
-    paths-ignore:
-      - 'backend/**'
-      - 'render.yaml'
-      - '.github/workflows/backend-test.yml'
   workflow_dispatch:
+    inputs:
+      notes:
+        description: 'Bu derlemede test edilecekler (Release açıklamasına yazılır)'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -46,4 +46,5 @@ jobs:
         with:
           tag_name: build-${{ github.run_number }}
           name: Build ${{ github.run_number }}
+          body: ${{ inputs.notes }}
           files: build/app/outputs/flutter-apk/app-release.apk

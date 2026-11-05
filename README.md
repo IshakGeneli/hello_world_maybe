@@ -4,8 +4,8 @@ Basit bir Flutter uygulaması: "Merhaba Dünya" yazısı ve sayaç butonu.
 
 ## Derleme
 
-`main` dalına her push'ta GitHub Actions APK'yı derler ve **Releases** bölümüne yükler.
-Elle başlatmak için: Actions → "Android APK Derle" → Run workflow.
+APK otomatik derlenmez; sadece elle başlatılınca derlenir ve **Releases** bölümüne yüklenir.
+Başlatmak için: Actions → "Android APK Derle" → Run workflow (istersen "test edilecekler" notunu yaz).
 
 ## Telefona kurma
 
