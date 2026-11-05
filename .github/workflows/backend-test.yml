@@ -33,7 +33,17 @@ jobs:
       - run: npm install
       - name: Eski şemayı kur (yükseltme denensin diye)
         run: |
-          psql "$DATABASE_URL" -c "CREATE TABLE photos (id SERIAL PRIMARY KEY, filename TEXT NOT NULL, mime_type TEXT NOT NULL, size_bytes INTEGER NOT NULL, data BYTEA NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now())"
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
+          CREATE TABLE photos (id SERIAL PRIMARY KEY, filename TEXT NOT NULL, mime_type TEXT NOT NULL,
+            size_bytes INTEGER NOT NULL, data BYTEA NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+          CREATE TABLE places (id SERIAL PRIMARY KEY, title TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'planned' CHECK (status IN ('planned', 'visited')), date DATE,
+            location_name TEXT, lat DOUBLE PRECISION, lng DOUBLE PRECISION, notes TEXT,
+            rating SMALLINT CHECK (rating BETWEEN 1 AND 5), comment TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now());
+          ALTER TABLE photos ADD COLUMN place_id INTEGER REFERENCES places(id) ON DELETE CASCADE;
+          INSERT INTO places (title) VALUES ('Eski Yer');
+          SQL
       - name: Sunucuyu başlat
         run: |
           npm start > server.log 2>&1 &
@@ -42,10 +52,13 @@ jobs:
         run: node test/smoke.js
       - name: Yeniden başlatınca şema bozulmasın
         run: |
+          TOKEN=$(curl -sf -H 'Content-Type: application/json' -d '{"email":"ali@example.com","password":"sifre123"}' localhost:3000/auth/login | node -p "JSON.parse(require('fs').readFileSync(0)).token")
           pkill -f "node server.js" || true
           sleep 1
           npm start >> server.log 2>&1 &
           for i in $(seq 1 30); do curl -sf localhost:3000/health && break; sleep 1; done
-          curl -sf localhost:3000/places
+          [ "$(curl -s -o /dev/null -w '%{http_code}' localhost:3000/places)" = 401 ]
+          # Oturum anahtarı yeniden başlatmada korunmalı: eski token hâlâ geçerli
+          curl -sf -H "Authorization: Bearer $TOKEN" localhost:3000/agendas
       - if: always()
         run: cat server.log
