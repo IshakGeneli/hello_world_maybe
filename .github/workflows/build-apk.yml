@@ -3,6 +3,10 @@ name: Android APK Derle
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'backend/**'
+      - 'render.yaml'
+      - '.github/workflows/backend-test.yml'
   workflow_dispatch:
 
 permissions:

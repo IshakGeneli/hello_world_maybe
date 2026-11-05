@@ -1,0 +1,60 @@
+name: Backend Test
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-test.yml'
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: photos
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL: postgres://postgres:test@localhost:5432/photos
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install
+      - name: Sunucuyu başlat
+        run: |
+          npm start > server.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf localhost:3000/health && break; sleep 1; done
+      - name: Uç noktaları dene
+        run: |
+          set -e
+          printf '\x89PNG\r\n\x1a\nfake' > test.png
+          curl -sf localhost:3000/health
+          echo; echo "--- yükle"
+          curl -sf -F "photo=@test.png;type=image/png" localhost:3000/photos | tee up.json
+          ID=$(node -p "require('./up.json').id")
+          echo; echo "--- liste"
+          curl -sf localhost:3000/photos | tee list.json
+          node -e "const l=require('./list.json'); if(l.length!==1) process.exit(1)"
+          echo; echo "--- resim"
+          curl -sf localhost:3000/photos/$ID/image -o got.png
+          cmp test.png got.png
+          echo "--- resim olmayan dosya reddedilmeli"
+          code=$(curl -s -o /dev/null -w '%{http_code}' -F "photo=@package.json;type=application/json" localhost:3000/photos)
+          [ "$code" = 400 ]
+          echo "--- sil"
+          curl -sf -X DELETE localhost:3000/photos/$ID
+          [ "$(curl -s localhost:3000/photos)" = "[]" ]
+          echo "TÜM TESTLER GEÇTİ"
+      - if: always()
+        run: cat server.log
